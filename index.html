@@ -1,0 +1,476 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="theme-color" content="#101827">
+<title>Chess AI - Stockfish Battle (Fixed)</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/chess.js/0.10.3/chess.min.js"></script>
+<style>
+*{box-sizing:border-box}
+body{margin:0;padding:18px 12px 32px;background:linear-gradient(135deg,#101827,#26364d);color:#fff;font-family:Arial,sans-serif;text-align:center}
+.container{max-width:540px;margin:auto}
+h1{color:#f5c96b;margin:5px 0}
+.small{color:#b9c5d6;font-size:13px;line-height:1.5}
+.panel{background:#202e42;padding:15px;border-radius:15px;margin:12px 0}
+.board{display:grid;grid-template-columns:repeat(8,1fr);width:100%;aspect-ratio:1;border:5px solid #70543c;border-radius:5px;overflow:hidden;touch-action:manipulation}
+.square{display:flex;justify-content:center;align-items:center;aspect-ratio:1;font-size:clamp(25px,8vw,49px);cursor:pointer;position:relative;user-select:none;-webkit-tap-highlight-color:transparent}
+.light{background:#f0d9b5}.dark{background:#b58863}
+.selected{background:#f6e65b!important}
+.possible::after{content:"";width:25%;height:25%;background:#287c43;opacity:.8;border-radius:50%;position:absolute}
+.possible.capture::after{width:82%;height:82%;background:transparent;border:5px solid #287c43;opacity:.75}
+.last{background:#c6c64b!important}
+.hint-from{box-shadow:inset 0 0 0 5px #20d878}
+.hint-to{box-shadow:inset 0 0 0 5px #ffdc42}
+.in-check{background:#df4545!important;box-shadow:inset 0 0 0 5px #ff2020,0 0 16px rgba(255,35,35,.75);animation:checkPulse .85s infinite alternate;z-index:1}
+@keyframes checkPulse{from{filter:brightness(.94)}to{filter:brightness(1.28)}}
+.white-piece{color:#fff;text-shadow:1px 2px 2px #222}.black-piece{color:#171717;text-shadow:1px 1px 1px #fff}
+button,select{padding:11px 13px;border:0;border-radius:8px;margin:5px;font-size:14px}
+button{background:#e9b94e;color:#222;font-weight:bold;cursor:pointer;touch-action:manipulation}
+button:active{transform:scale(.97)}
+button:disabled,select:disabled{opacity:.45;cursor:not-allowed;transform:none}
+.secondary{background:#52657e;color:white}.hint-button{background:#36bd83;color:#10251b}.play-hint{background:#f0c14c;color:#222}.retry{background:#e58c54;color:#24170e}
+select{background:#fff;color:#222;max-width:100%}
+.controls{display:flex;flex-wrap:wrap;justify-content:center;gap:4px}
+#status{font-weight:bold;color:#f5d37b;min-height:25px;margin-top:12px;line-height:1.45}
+#status.check-status{color:#ff7777}
+#history{max-height:155px;overflow-y:auto;text-align:left;line-height:1.8;font-size:14px}
+#hintBox{background:#263e43;border:1px solid #348e70;border-radius:10px;padding:12px;margin-top:12px;text-align:left;font-size:14px;line-height:1.65;color:#d9f8e9;min-height:55px;overflow-wrap:anywhere}
+#hintBox b{color:#65e5a6}
+.legend{display:flex;justify-content:center;gap:14px;flex-wrap:wrap;font-size:12px;color:#dce4ee;margin-top:9px}
+.dot{display:inline-block;width:11px;height:11px;border-radius:3px;margin-right:4px;vertical-align:-1px}
+.red{background:#df4545}.green{background:#20d878}.yellow{background:#ffdc42}
+#engineInfo{font-size:12px;color:#aebfd2;margin-top:9px;line-height:1.5;overflow-wrap:anywhere}
+#engineBadge{display:inline-block;border-radius:20px;padding:5px 9px;font-size:12px;background:#31445a;color:#d8e9ff;margin-top:7px}
+#errorDetails{display:none;margin-top:8px;color:#ffc1c1;font-size:12px;line-height:1.5;text-align:left;overflow-wrap:anywhere}
+@media(max-width:360px){.square{font-size:25px}button{font-size:12px;padding:10px}}
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>♟ CHESS AI</h1>
+  <p class="small">Stockfish Battle · Đấu trí cùng AI</p>
+
+  <div class="panel">
+    <div>🤖 Độ khó của AI</div>
+    <select id="difficulty" onchange="clearHint()">
+      <option value="1">Dễ - Level 1</option>
+      <option value="2">Trung bình - Level 2</option>
+      <option value="3" selected>Khó - Level 3</option>
+      <option value="4">Rất khó - Level 4</option>
+    </select>
+    <div id="status">Đang tải bộ máy cờ vua...</div>
+    <div id="engineBadge">⏳ Đang khởi động Stockfish 19 Lite</div>
+    <div class="legend">
+      <span><i class="dot red"></i>Vua đang bị chiếu</span>
+      <span><i class="dot green"></i>Ô xuất phát gợi ý</span>
+      <span><i class="dot yellow"></i>Ô đến gợi ý</span>
+    </div>
+    <div id="errorDetails"></div>
+  </div>
+
+  <div class="board" id="board" aria-label="Bàn cờ vua"></div>
+
+  <div class="panel">
+    <h3>💡 AI TRỢ LÝ CHIẾN THUẬT</h3>
+    <p class="small">Trợ lý dùng cùng engine Stockfish với đối thủ. Phân tích nước đi tốt, tính các biến chiến thuật và tìm nước gỡ chiếu.</p>
+    <div class="controls">
+      <button class="hint-button" id="btnHint" onclick="getHint()">💡 Gợi ý nước đi</button>
+      <button class="play-hint" id="btnPlayHint" onclick="playHint()" disabled>▶ Đi nước gợi ý</button>
+    </div>
+    <div id="hintBox">Đang nạp engine. Khi tải xong, nhấn “Gợi ý nước đi” để phân tích thế cờ.</div>
+    <div id="engineInfo">Stockfish 19 Lite Single · WASM · Web Worker · một luồng</div>
+    <button class="retry" id="btnRetry" onclick="retryEngine()" hidden>↻ Tải lại engine</button>
+  </div>
+
+  <div class="panel">
+    <h3>🎮 Điều khiển</h3>
+    <div class="controls">
+      <button class="secondary" id="btnUndo" onclick="undoMove()">↩ Đi lại</button>
+      <button id="btnNew" onclick="newGame()">🔄 Chơi lại</button>
+    </div>
+  </div>
+
+  <div class="panel">
+    <b>📜 Lịch sử nước đi</b>
+    <div id="history">Chưa có nước đi.</div>
+  </div>
+
+  <p class="small">Engine Stockfish 19 Lite Single · cần Internet để tải engine lần đầu. Engine theo giấy phép GPL-3.0. Độ sâu/thời gian tìm kiếm tùy độ khó và tốc độ điện thoại.</p>
+</div>
+
+<script>
+'use strict';
+
+if(typeof Chess === 'undefined'){
+  document.getElementById('status').textContent='Không tải được chess.js. Hãy kiểm tra kết nối hoặc thử tải lại trang.';
+  document.getElementById('engineBadge').textContent='⚠ Thiếu thư viện luật cờ';
+  throw new Error('Không tải được chess.js từ CDNJS.');
+}
+
+/*
+  FIX CHÍNH:
+  Các file build của gói npm stockfish nằm trong thư mục /bin/.
+  Bản trước thiếu /bin/ nên URL JS và WASM đều trỏ sai (404).
+  Dùng Blob Worker để Worker vẫn được tạo cùng-origin, sau đó importScripts
+  tải engine từ CDN. locateFile ánh xạ WASM về đúng thư mục /bin/.
+*/
+const SF_VERSION='19.0.1';
+const SF_JS='stockfish-19-lite-single.js';
+const SF_WASM='stockfish-19-lite-single.wasm';
+const SF_BASES=[
+  'https://cdn.jsdelivr.net/npm/stockfish@'+SF_VERSION+'/bin/',
+  'https://unpkg.com/stockfish@'+SF_VERSION+'/bin/'
+];
+const LEVELS={
+  1:{skill:0,time:500,label:'Dễ'},
+  2:{skill:6,time:900,label:'Trung bình'},
+  3:{skill:13,time:1700,label:'Khó'},
+  4:{skill:20,time:3000,label:'Rất khó'}
+};
+
+const game=new Chess();
+const symbols={wp:'♙',wr:'♖',wn:'♘',wb:'♗',wq:'♕',wk:'♔',bp:'♟',br:'♜',bn:'♞',bb:'♝',bq:'♛',bk:'♚'};
+let selected=null,possible=[],lastMove=null,hint=null;
+let aiThinking=false,hintThinking=false;
+let sfWorker=null,sfBlobUrl=null,enginePromise=null,engineReady=false,engineError=null,activeTask=null;
+
+function busy(){return aiThinking||hintThinking;}
+function currentLevel(){return LEVELS[Number(document.getElementById('difficulty').value)]||LEVELS[3];}
+function getSquareOfCheckedKing(){
+  if(!game.in_check())return null;
+  const color=game.turn(),board=game.board();
+  for(let r=0;r<8;r++)for(let c=0;c<8;c++){
+    const p=board[r][c];
+    if(p&&p.type==='k'&&p.color===color)return String.fromCharCode(97+c)+(8-r);
+  }
+  return null;
+}
+function setEngineBadge(text){document.getElementById('engineBadge').textContent=text;}
+function showEngineError(message){
+  const el=document.getElementById('errorDetails');
+  el.style.display='block';
+  el.textContent='Chi tiết: '+message;
+  document.getElementById('btnRetry').hidden=false;
+}
+function hideEngineError(){
+  const el=document.getElementById('errorDetails');
+  el.style.display='none';el.textContent='';
+}
+
+// Worker Blob nhập engine từ CDN. Cả JS và WASM đều dùng chung base URL có /bin/.
+function createEngineWorker(){
+  if(typeof Worker==='undefined')throw new Error('Trình duyệt/Preview này không hỗ trợ Web Worker. Hãy mở file bằng Chrome.');
+  if(typeof Blob==='undefined'||!URL.createObjectURL)throw new Error('Trình duyệt không hỗ trợ Blob Worker.');
+  const source=`
+    const BASES=${JSON.stringify(SF_BASES)};
+    const JS_FILE=${JSON.stringify(SF_JS)};
+    const WASM_FILE=${JSON.stringify(SF_WASM)};
+    self.Module=self.Module||{};
+    let selectedBase='';
+    function configureBase(base){
+      selectedBase=base;
+      self.Module.locateFile=function(path){
+        if(path&&path.endsWith('.wasm'))return selectedBase+WASM_FILE;
+        return selectedBase+path;
+      };
+    }
+    function boot(index,lastError){
+      if(index>=BASES.length){
+        self.postMessage('ENGINE_LOAD_ERROR|'+String(lastError||'Không tải được file engine từ các CDN'));
+        return;
+      }
+      configureBase(BASES[index]);
+      try{
+        importScripts(selectedBase+JS_FILE);
+      }catch(error){
+        boot(index+1,error&&error.message?error.message:String(error));
+      }
+    }
+    boot(0,null);
+  `;
+  const blob=new Blob([source],{type:'text/javascript'});
+  sfBlobUrl=URL.createObjectURL(blob);
+  try{return new Worker(sfBlobUrl);}catch(error){URL.revokeObjectURL(sfBlobUrl);sfBlobUrl=null;throw error;}
+}
+
+function startEngine(){
+  if(enginePromise)return enginePromise;
+  engineError=null;hideEngineError();
+  setEngineBadge('⏳ Đang tải Stockfish 19 Lite (~1,7 MB)...');
+  document.getElementById('btnRetry').hidden=true;
+  enginePromise=new Promise((resolve,reject)=>{
+    let settled=false;
+    let initTimer=null;
+    const fail=(err)=>{
+      if(settled)return;
+      settled=true;
+      if(initTimer)clearTimeout(initTimer);
+      reject(err instanceof Error?err:new Error(String(err)));
+    };
+    try{sfWorker=createEngineWorker();}
+    catch(error){fail(error);return;}
+
+    initTimer=setTimeout(()=>fail(new Error('Hết 45 giây mà engine chưa khởi động. Có thể Preview chặn Blob Worker/CDN, dù kết nối Internet vẫn bình thường.')),45000);
+
+    sfWorker.onmessage=(event)=>{
+      const line=String(event.data||'').trim();
+      if(!line)return;
+      if(line.startsWith('ENGINE_LOAD_ERROR|')){
+        fail(new Error('Không nạp được file '+SF_JS+' từ jsDelivr hoặc unpkg. '+line.slice('ENGINE_LOAD_ERROR|'.length)));
+        return;
+      }
+      if(line==='uciok'){
+        // Engine lite-single đã cố định một luồng; không cần đặt Threads.
+        sfWorker.postMessage('setoption name Hash value 32');
+        sfWorker.postMessage('isready');
+        return;
+      }
+      if(line==='readyok'&&!settled){
+        settled=true;clearTimeout(initTimer);engineReady=true;engineError=null;
+        if(sfBlobUrl){URL.revokeObjectURL(sfBlobUrl);sfBlobUrl=null;}
+        setEngineBadge('✅ Stockfish 19 đã sẵn sàng');
+        updateControls();updateStatus();resolve(true);return;
+      }
+      if(activeTask&&line.startsWith('info ')){
+        const depth=line.match(/\\bdepth\\s+(\\d+)/);
+        const nodes=line.match(/\\bnodes\\s+(\\d+)/);
+        const cp=line.match(/\\bscore\\s+cp\\s+(-?\\d+)/);
+        const mate=line.match(/\\bscore\\s+mate\\s+(-?\\d+)/);
+        if(depth)activeTask.depth=Number(depth[1]);
+        if(nodes)activeTask.nodes=Number(nodes[1]);
+        if(cp)activeTask.score={type:'cp',value:Number(cp[1])};
+        if(mate)activeTask.score={type:'mate',value:Number(mate[1])};
+        updateThinkingText();return;
+      }
+      if(activeTask&&line.startsWith('bestmove ')){
+        const task=activeTask;activeTask=null;
+        if(task.timer)clearTimeout(task.timer);
+        const match=line.match(/^bestmove\\s+(\\S+)(?:\\s+ponder\\s+(\\S+))?/);
+        task.resolve({uci:match?match[1]:null,depth:task.depth||0,nodes:task.nodes||0,score:task.score||null,fen:task.fen});
+      }
+    };
+    sfWorker.onerror=(event)=>{
+      const msg=event&&event.message?event.message:'Worker không thể tải/chạy script engine.';
+      const err=new Error(msg+' (kiểm tra đường dẫn /bin/, quyền Worker hoặc CSP của Preview)');
+      engineError=err;engineReady=false;enginePromise=null;
+      setEngineBadge('⚠ Engine bị lỗi khi chạy');
+      showEngineError(err.message);
+      fail(err);
+      if(activeTask){const task=activeTask;activeTask=null;if(task.timer)clearTimeout(task.timer);task.reject(err);}
+      updateControls();updateStatus();
+    };
+    sfWorker.onmessageerror=()=>fail(new Error('Worker trả về dữ liệu không đọc được.'));
+    sfWorker.postMessage('uci');
+  }).catch(err=>{
+    engineError=err;engineReady=false;enginePromise=null;
+    if(sfWorker){try{sfWorker.terminate();}catch(_){}sfWorker=null;}
+    if(sfBlobUrl){URL.revokeObjectURL(sfBlobUrl);sfBlobUrl=null;}
+    setEngineBadge('⚠ Không khởi động được engine');
+    showEngineError(err.message||String(err));
+    document.getElementById('hintBox').textContent='Stockfish chưa khởi động. Xem chi tiết lỗi ngay dưới trạng thái engine.';
+    updateControls();updateStatus();
+    throw err;
+  });
+  return enginePromise;
+}
+
+async function ensureEngine(){
+  if(engineReady&&sfWorker)return true;
+  return startEngine();
+}
+function parseUciMove(uci){
+  if(!uci||uci==='(none)'||uci==='0000')return null;
+  const m=uci.match(/^([a-h][1-8])([a-h][1-8])([qrbn])?$/i);
+  if(!m)return null;
+  return {from:m[1],to:m[2],promotion:m[3]?m[3].toLowerCase():'q'};
+}
+async function askStockfish(fen){
+  await ensureEngine();
+  if(activeTask)throw new Error('Engine đang xử lý một yêu cầu khác.');
+  const cfg=currentLevel();
+  return new Promise((resolve,reject)=>{
+    const task={resolve,reject,fen,depth:0,nodes:0,score:null,timer:null};
+    activeTask=task;
+    sfWorker.postMessage('setoption name Skill Level value '+cfg.skill);
+    sfWorker.postMessage('position fen '+fen);
+    sfWorker.postMessage('go movetime '+cfg.time);
+    task.timer=setTimeout(()=>{
+      if(activeTask===task){
+        sfWorker.postMessage('stop');
+        task.timer=setTimeout(()=>{
+          if(activeTask===task){activeTask=null;reject(new Error('Engine không trả bestmove sau khi được yêu cầu dừng.'));}
+        },5000);
+      }
+    },cfg.time+12000);
+  });
+}
+function updateThinkingText(){
+  const task=activeTask;if(!task)return;
+  const msg='🧠 Đang tính... độ sâu '+task.depth+' · '+(task.nodes||0).toLocaleString('vi-VN')+' nút';
+  document.getElementById('status').textContent=msg;
+  if(hintThinking)document.getElementById('hintBox').textContent=msg;
+}
+
+function render(){
+  const root=document.getElementById('board');root.innerHTML='';
+  const position=game.board(),checked=getSquareOfCheckedKing();
+  const suggested=hint&&hint.fen===game.fen()?hint.move:null;
+  for(let r=0;r<8;r++)for(let c=0;c<8;c++){
+    const sq=String.fromCharCode(97+c)+(8-r),piece=position[r][c];
+    const cell=document.createElement('div');
+    cell.className='square '+((r+c)%2===0?'light':'dark');
+    if(selected===sq)cell.classList.add('selected');
+    if(lastMove&&(lastMove.from===sq||lastMove.to===sq))cell.classList.add('last');
+    if(possible.includes(sq)){cell.classList.add('possible');if(piece)cell.classList.add('capture');}
+    if(suggested&&suggested.from===sq)cell.classList.add('hint-from');
+    if(suggested&&suggested.to===sq)cell.classList.add('hint-to');
+    if(checked===sq)cell.classList.add('in-check');
+    if(piece){cell.textContent=symbols[piece.color+piece.type];cell.classList.add(piece.color==='w'?'white-piece':'black-piece');}
+    cell.setAttribute('role','button');cell.setAttribute('aria-label',sq+(piece?' '+piece.color+' '+piece.type:''));
+    cell.onclick=()=>clickSquare(sq);root.appendChild(cell);
+  }
+  updateStatus();updateHistory();updateHintPanel();updateControls();
+}
+function updateStatus(){
+  const el=document.getElementById('status');el.classList.remove('check-status');
+  if(game.in_checkmate()){el.textContent=game.turn()==='w'?'💀 Chiếu hết! AI chiến thắng.':'🏆 Chiếu hết! Bạn đã chiến thắng!';el.classList.add('check-status');}
+  else if(game.in_stalemate())el.textContent='🤝 Hòa cờ — hết nước đi hợp lệ.';
+  else if(game.in_draw())el.textContent='🤝 Ván cờ hòa.';
+  else if(game.in_check()){el.textContent=game.turn()==='w'?'🚨 CHIẾU! Vua Trắng đang bị tấn công — hãy gỡ chiếu!':'🚨 CHIẾU! Vua Đen đang bị tấn công — AI phải gỡ chiếu!';el.classList.add('check-status');}
+  else if(aiThinking)el.textContent='🤖 Stockfish đang tìm nước đi...';
+  else if(hintThinking)el.textContent='🧠 Stockfish đang phân tích...';
+  else if(!engineReady)el.textContent=engineError?'⚠ Engine chưa sẵn sàng':'⏳ Đang tải engine...';
+  else el.textContent=game.turn()==='w'?'⚪ Đến lượt bạn':'⚫ Đến lượt AI';
+}
+function updateControls(){
+  const locked=busy()||game.game_over();
+  document.getElementById('btnHint').disabled=locked||game.turn()!=='w'||!engineReady;
+  document.getElementById('btnPlayHint').disabled=locked||!hint||hint.fen!==game.fen()||game.turn()!=='w';
+  document.getElementById('btnUndo').disabled=busy()||game.history().length===0;
+  document.getElementById('btnNew').disabled=busy();
+  document.getElementById('difficulty').disabled=busy();
+  document.querySelectorAll('#board .square').forEach(s=>s.style.pointerEvents=locked?'none':'auto');
+}
+function updateHistory(){
+  const h=game.history();let html='';
+  for(let i=0;i<h.length;i+=2)html+=(Math.floor(i/2)+1)+'. '+h[i]+' '+(h[i+1]||'')+'<br>';
+  document.getElementById('history').innerHTML=html||'Chưa có nước đi.';
+}
+function clearHint(){hint=null;render();}
+function explainMove(m){
+  if(m.san&&m.san.includes('#'))return 'Nước này chiếu hết đối thủ.';
+  if(m.promotion)return 'Phong cấp tốt thành '+({q:'Hậu',r:'Xe',b:'Tượng',n:'Mã'}[m.promotion])+'.';
+  if(m.san&&m.san.includes('+'))return 'Nước chiếu buộc đối thủ phải xử lý vua.';
+  if(m.captured)return 'Nước này bắt '+({p:'Tốt',n:'Mã',b:'Tượng',r:'Xe',q:'Hậu'}[m.captured]||'quân')+' của đối phương.';
+  if(m.flags&&(m.flags.includes('k')||m.flags.includes('q')))return 'Nhập thành để đưa vua về vị trí an toàn.';
+  return 'Nước tốt nhất engine tìm được ở mức thời gian/độ khó hiện tại. Hãy để ý các nước đáp trả tiếp theo.';
+}
+function updateHintPanel(){
+  const box=document.getElementById('hintBox');
+  if(hintThinking){if(!activeTask)box.textContent='🧠 Đang khởi động Stockfish và phân tích...';return;}
+  if(hint&&hint.fen===game.fen()){
+    const s=hint.score;let evalText='';
+    if(s&&s.type==='mate')evalText='Đánh giá: chiếu hết trong '+Math.abs(s.value)+' nước theo góc nhìn engine.';
+    else if(s&&s.type==='cp')evalText='Đánh giá engine: '+(hint.whiteScore>=0?'+':'')+(hint.whiteScore/100).toFixed(2)+' tốt cho Trắng.';
+    box.innerHTML='<b>✨ Nước đề xuất: '+hint.move.san+' ('+hint.move.from+' → '+hint.move.to+')</b><br>'+explainMove(hint.move)+'<br>'+(evalText?evalText+'<br>':'')+'<span class="small">Độ sâu: '+hint.depth+' · '+(hint.nodes||0).toLocaleString('vi-VN')+' nút. Stockfish chọn phương án tốt nhất tìm được, không thể bảo đảm thắng tuyệt đối.</span>';
+  }else if(game.in_check()&&game.turn()==='w')box.textContent='🚨 Bạn đang bị chiếu! Nhấn Gợi ý nước đi để Stockfish tìm nước bắt quân chiếu, chắn đường chiếu hoặc di chuyển vua hợp lệ.';
+  else if(engineError)box.textContent='Engine chưa tải được. Xem thông báo lỗi chi tiết phía trên và thử nút “Tải lại engine”.';
+  else box.textContent='Chưa có phân tích. Nhấn “Gợi ý nước đi” để Stockfish xem thế cờ.';
+}
+function clickSquare(sq){
+  if(busy()||game.game_over()||game.turn()!=='w')return;
+  if(selected&&possible.includes(sq)){
+    let promotion='q';
+    const promotions=game.moves({square:selected,verbose:true}).filter(m=>m.to===sq&&m.promotion);
+    if(promotions.length){
+      const choice=prompt('Phong cấp thành quân nào?\nq = Hậu, r = Xe, b = Tượng, n = Mã','q');
+      if(choice===null)return;
+      const normalized=choice.trim().toLowerCase();promotion=['q','r','b','n'].includes(normalized)?normalized:'q';
+    }
+    const move=game.move({from:selected,to:sq,promotion});
+    if(move){afterPlayerMove(move);return;}
+  }
+  const piece=game.get(sq);
+  if(piece&&piece.color==='w'){
+    selected=sq;possible=[...new Set(game.moves({square:sq,verbose:true}).map(m=>m.to))];
+  }else{selected=null;possible=[];}
+  render();
+}
+function afterPlayerMove(move){
+  lastMove=move;selected=null;possible=[];hint=null;
+  if(game.game_over()){render();return;}
+  if(!engineReady){render();return;}
+  aiThinking=true;render();setTimeout(aiMove,80);
+}
+async function aiMove(){
+  try{
+    if(game.game_over())return;
+    const fen=game.fen(),result=await askStockfish(fen);
+    if(game.fen()!==fen||game.turn()!=='b')return;
+    const uci=parseUciMove(result.uci);
+    if(!uci)throw new Error('Stockfish không trả về nước đi hợp lệ.');
+    const move=game.move(uci);
+    if(!move)throw new Error('Nước đi Stockfish trả về không hợp lệ: '+result.uci);
+    lastMove=move;
+  }catch(err){
+    console.error('Stockfish move error:',err);
+    document.getElementById('hintBox').textContent='AI không thể đi: '+err.message+' Hãy thử tải lại engine.';
+  }finally{aiThinking=false;selected=null;possible=[];hint=null;render();}
+}
+async function getHint(){
+  if(busy()||game.game_over()||game.turn()!=='w'||!engineReady)return;
+  hintThinking=true;hint=null;selected=null;possible=[];render();
+  try{
+    const fen=game.fen(),result=await askStockfish(fen);
+    if(game.fen()!==fen||game.turn()!=='w')return;
+    const uci=parseUciMove(result.uci);
+    if(!uci)throw new Error('Engine không tìm được nước đi hợp lệ.');
+    const copy=new Chess(fen),verbose=copy.move(uci);
+    if(!verbose)throw new Error('Không xác thực được nước gợi ý.');
+    let whiteScore=null;
+    if(result.score){const sideToMove=fen.split(/\s+/)[1];whiteScore=result.score.value*(sideToMove==='w'?1:-1);}
+    hint={fen,move:verbose,score:result.score,whiteScore,depth:result.depth,nodes:result.nodes};
+  }catch(err){
+    console.error('Hint error:',err);
+    document.getElementById('hintBox').textContent='Không thể phân tích: '+err.message;
+  }finally{hintThinking=false;render();}
+}
+function playHint(){
+  if(!hint||busy()||game.game_over()||game.turn()!=='w'||hint.fen!==game.fen())return;
+  const move=game.move({from:hint.move.from,to:hint.move.to,promotion:hint.move.promotion||'q'});
+  if(move)afterPlayerMove(move);
+}
+function undoMove(){
+  if(busy()||game.history().length===0)return;
+  const countBefore=game.history().length;
+  game.undo();
+  if(countBefore>=2&&game.turn()==='b')game.undo();
+  selected=null;possible=[];hint=null;
+  const h=game.history({verbose:true});lastMove=h.length?h[h.length-1]:null;
+  render();
+}
+function newGame(){
+  if(busy())return;
+  game.reset();selected=null;possible=[];lastMove=null;hint=null;
+  if(engineReady&&sfWorker)sfWorker.postMessage('ucinewgame');
+  render();
+}
+function retryEngine(){
+  if(busy())return;
+  if(sfWorker){try{sfWorker.terminate();}catch(_){}}
+  if(sfBlobUrl){URL.revokeObjectURL(sfBlobUrl);sfBlobUrl=null;}
+  sfWorker=null;engineReady=false;enginePromise=null;engineError=null;activeTask=null;
+  startEngine().then(()=>{render();if(game.turn()==='b'&&!game.game_over()) {aiThinking=true;render();aiMove();}}).catch(()=>render());
+  render();
+}
+
+render();
+startEngine().then(()=>{
+  render();
+  // Nếu người chơi đã kịp đi khi engine vừa khởi động, để AI đi ngay sau đó.
+  if(game.turn()==='b'&&!game.game_over()&&!busy()){aiThinking=true;render();aiMove();}
+}).catch(()=>render());
+</script>
+</body>
+</html>
